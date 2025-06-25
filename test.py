@@ -4,17 +4,16 @@ import plotly.graph_objects as go
 from scipy.optimize import brentq
 
 st.set_page_config(page_title="지수·로그 교점 찾기", layout="centered")
-st.title("지수·로그 함수 교점 찾기")
+st.title("지수·로그 함수 교점 찾기 (전 구간)")
 
 st.markdown(
     r"""
-### 사용 방법
-1. **지수함수**   \(y = a^{\,x+b} + c\)  
-2. **로그함수**   \(y = p\log_{d}(x+e) + f\)
+### 함수식
+- **지수** \(y = a^{\,x+b} + c\)  
+- **로그** \(y = p\log_{d}(x+e) + f\)
 
-아래 입력창에 **a, b, c, p, d (or e), e, f** 값을 넣고  
-**🔍 교점 찾기**를 누르세요.  
-제약 : \(a>0,\;a\neq1,\;d>0,\;d\neq1,\;x+e>0\)
+모든 실수 \(x\) 에 대해 두 함수를 고려합니다  
+(\(\log\) 정의역 조건 \(x+e>0\) 은 내부에서 자동 처리)
 """)
 
 # ────────────────────────── 1️⃣ 매개변수 입력
@@ -31,8 +30,7 @@ with col_log:
     st.markdown("**로그함수**  \(p·log_d(x+e)+f\)")
     p = st.number_input("p (계수)", value=1.0, format="%.6f")
 
-    # ★ 자연로그 옵션 추가 ★
-    use_ln = st.checkbox("밑 d 를 자연상수 e (≈ 2.71828) 로 사용", value=False)
+    use_ln = st.checkbox("밑 d 를 자연상수 e 로 사용", value=False)
     if use_ln:
         d_val = np.e
         st.markdown(f"**d = {d_val:.5f} (고정)**")
@@ -42,63 +40,60 @@ with col_log:
     e = st.number_input("e (수평 이동)", value=0.0, format="%.6f")
     f = st.number_input("f (수직 이동)", value=0.0, format="%.6f")
 
-st.divider()
-xmin, xmax = st.columns(2)
-x_min = xmin.number_input("그래프 x 최소", value=-5.0, format="%.2f")
-x_max = xmax.number_input("그래프 x 최대", value=5.0, format="%.2f")
-
-if x_min >= x_max:
-    st.error("x 최소는 최대보다 작아야 합니다.")
-    st.stop()
-
 btn = st.button("🔍 교점 찾기")
 
 # ────────────────────────── 2️⃣ 교점 계산
 def g(x: float) -> float:
-    """지수 - 로그 (g(x)=0 ⇒ 교점)"""
+    """지수 - 로그 (g(x)=0 ⇒ 교점). 로그 쪽 정의역 자동 체킹."""
+    if x + e <= 0:
+        return np.nan   # 정의역 밖 -> NaN
     return a ** (x + b) + c - (p * np.log(x + e) / np.log(d_val) + f)
 
 if btn:
-    if x_min + e <= 0:
-        st.warning("선택 구간 일부에서 로그 정의역 조건 x+e>0 가 위반됩니다.")
-
     st.subheader("2️⃣  교점 계산 결과")
-    xs = np.linspace(x_min, x_max, 4001)
-    ys = g(xs)
-    roots = []
 
-    for xl, xr, yl, yr in zip(xs[:-1], xs[1:], ys[:-1], ys[1:]):
-        if yl == 0:
-            roots.append(xl)
-        elif yl * yr < 0:
+    # ❶ 탐색 구간 자동 설정: 로그 정의역 시작점을 기준으로 넉넉히 좌‧우 50씩
+    left  = -50.0 if ( -50.0 + e > 0 ) else (-e + 1e-4)
+    right = 50.0
+    xs = np.linspace(left, right, 10001)
+    ys = np.array([g(x) for x in xs])
+
+    # NaN 구간은 건너뛰고 부호 변화 탐색
+    roots = []
+    for i in range(len(xs) - 1):
+        y1, y2 = ys[i], ys[i+1]
+        if np.isnan(y1) or np.isnan(y2):
+            continue
+        if y1 == 0:
+            roots.append(xs[i])
+        elif y1 * y2 < 0:
             try:
-                r = brentq(g, xl, xr)
+                r = brentq(g, xs[i], xs[i+1])
                 if all(abs(r - r0) > 1e-7 for r0 in roots):
                     roots.append(r)
             except ValueError:
                 pass
 
     if not roots:
-        st.info("주어진 구간에서 교점을 찾지 못했습니다.")
+        st.info("탐색 범위 내 교점을 찾지 못했습니다.")
     else:
         roots.sort()
         st.table([{"#": i+1, "x": r, "y": a**(r+b)+c} for i, r in enumerate(roots)])
 
         st.markdown(
             r"""
-- 차이 함수 \(g(x)=a^{x+b}+c -\bigl(p\log_{d}(x+e)+f\bigr)\) 를 정의,  
-  **부호 변화 구간**을 찾아 `scipy.optimize.brentq` 로 근을 구했습니다.  
-- 근 중복은 |Δx| < 1 × 10⁻⁷ 범위에서 제거했습니다.
+- 로그 정의역 \((x+e>0)\) 를 제외한 부분은 자동으로 무시했습니다.  
+- `scipy.optimize.brentq` 로 근을 찾고, |Δx| < 1 × 10⁻⁷ 중복은 제거했습니다.
 """)
 
         # ────────────────── 3️⃣ 그래프
         st.subheader("3️⃣  그래프")
-        x_dense = np.linspace(x_min, x_max, 1500)
+        # 더 넓은 해상도용 X축
+        x_dense = np.linspace(left, right, 4001)
         y_exp = a ** (x_dense + b) + c
 
-        mask = x_dense + e > 0
-        x_log = x_dense[mask]
-        y_log = p * np.log(x_log + e) / np.log(d_val) + f
+        mask = x_dense + e > 0      # 로그 정의역
+        x_log, y_log = x_dense[mask], p * np.log(x_dense[mask] + e) / np.log(d_val) + f
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=x_dense, y=y_exp,
